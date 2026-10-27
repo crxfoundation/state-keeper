@@ -148,3 +148,132 @@ fn entry_rate_word_rejects_short_data_and_high_bits() {
         "an entry-rate word exceeding u128 must refuse"
     );
 }
+
+fn recorded_history() -> ChainHistory {
+    ChainHistory {
+        opens: vec![open_record("open-1", 31_493_003), open_record("open-2", 31_663_433)],
+        folds: vec![fold_record("fold-1", 31_495_775), fold_record("fold-2", 31_663_509)],
+        twaps: vec![],
+        market_sets: vec![],
+        head: 31_663_525,
+    }
+}
+
+fn committed_table() -> crx_tree::engine::ScenarioTable {
+    crx_tree::load_scenario_table(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../data/scenario-table.bin"
+    )))
+    .expect("committed scenario table loads and validates")
+    .0
+}
+
+fn rebuild_err(history: &ChainHistory) -> String {
+    match rebuild(history, &committed_table()) {
+        Ok(_) => panic!("the altered history must not rebuild"),
+        Err(e) => e.to_string(),
+    }
+}
+
+#[test]
+fn a_fold_committed_on_another_scenario_root_is_refused() {
+    let mut h = recorded_history();
+    h.folds[0].pv.scenario_root = [9u8; 32];
+    assert!(rebuild_err(&h).contains("fold 1: committed scenarioRoot"));
+}
+
+#[test]
+fn a_fold_whose_root_prev_is_not_the_replayed_root_is_refused() {
+    let mut h = recorded_history();
+    h.folds[1].pv.roots.root_prev = [7u8; 32];
+    assert!(rebuild_err(&h).contains("fold 2 (block 31663509): replayed prior root"));
+}
+
+#[test]
+fn a_fold_whose_root_new_is_not_the_replayed_root_is_refused() {
+    let mut h = recorded_history();
+    h.folds[0].pv.roots.root_new = [7u8; 32];
+    assert!(rebuild_err(&h).contains("fold 1 (block 31495775): replayed root"));
+}
+
+#[test]
+fn a_fold_whose_accounts_root_is_not_the_replayed_registry_is_refused() {
+    let mut h = recorded_history();
+    h.folds[0].pv.roots.accounts_root_new = [7u8; 32];
+    assert!(rebuild_err(&h).contains("fold 1: replayed accountsRoot"));
+}
+
+#[test]
+fn a_fold_with_closeouts_is_refused_not_replayed() {
+    let mut h = recorded_history();
+    h.folds[0].pv.closeout_novations_len = 1;
+    assert!(rebuild_err(&h).contains("this replay does not model them yet"));
+}
+
+#[test]
+fn a_fold_that_consumes_an_unrecorded_open_is_refused() {
+    let mut h = recorded_history();
+    h.opens.remove(0);
+    assert!(rebuild_err(&h).contains("with no TermsOpened record"));
+}
+
+#[test]
+fn a_negative_consumed_mark_or_twap_is_refused() {
+    use crx_tree::guest_types::{ConsumedMark, ConsumedTwap};
+    let mut h = recorded_history();
+    h.folds[0].pv.consumed_marks.push(ConsumedMark { feed_id: [1u8; 32], mark_time: 1, price: -1, expo: -5 });
+    assert!(rebuild_err(&h).contains("negative consumed mark"));
+
+    let mut h = recorded_history();
+    h.folds[0].pv.consumed_twaps.push(ConsumedTwap { feed_id: [1u8; 32], close_time: 1, twap: -1, expo: -5 });
+    assert!(rebuild_err(&h).contains("negative consumed twap"));
+}
+
+#[test]
+fn unfolded_opens_are_the_opens_no_fold_consumed() {
+    let mut h = recorded_history();
+    assert!(h.unfolded_opens().is_empty(), "both recorded opens are folded");
+    h.folds.pop();
+    let ids: Vec<[u8; 32]> = h.unfolded_opens().iter().map(|o| o.id).collect();
+    assert_eq!(ids, vec![open_record("open-2", 31_663_433).id], "fold 2 consumed open 2");
+}
+
+#[test]
+fn public_values_that_are_not_the_15_row_struct_are_refused() {
+    let call = applyStateCall::abi_decode(&hex_fixture("fold-1")).expect("fixture decodes as applyState");
+    let pv = call.publicValues.to_vec();
+    assert!(decode_public_values(&pv).is_ok());
+    let e = decode_public_values(&pv[..pv.len() - 32]).err().expect("a truncated struct must not decode");
+    assert!(e.to_string().starts_with("decode 15-row PublicValuesStruct"));
+}
+
+#[test]
+fn frames_refuse_a_chain_registry_the_rebuilt_accounts_do_not_reproduce() {
+    let h = recorded_history();
+    let table = committed_table();
+    let state = rebuild(&h, &table).expect("replay reproduces every committed root");
+    let last = &h.folds[1].pv;
+    let inputs = EpochInputs {
+        new_positions: vec![],
+        proven_marks: vec![],
+        proven_twaps: vec![],
+        paused_pairs: vec![],
+        proof_now: last.proof_time,
+        domain_separator: last.domain_separator,
+    };
+    let e = build_advance_frames(&state, &inputs, &table, [3u8; 32]).err().expect("drifted registry");
+    assert!(e.to_string().contains("the account set drifted"));
+}
+
+#[test]
+fn a_scenario_table_that_is_absent_or_not_bincode_is_refused() {
+    let dir = std::env::temp_dir().join(format!("crx-tree-table-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let absent = crx_tree::load_scenario_table(&dir.join("none.bin")).err().expect("absent");
+    assert!(absent.to_string().starts_with("read scenario table"));
+    let garbled = dir.join("garbled.bin");
+    std::fs::write(&garbled, [0xffu8; 7]).unwrap();
+    let bad = crx_tree::load_scenario_table(&garbled).err().expect("not bincode");
+    assert!(bad.to_string().starts_with("bincode-deserialize ScenarioTable"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
