@@ -1,6 +1,6 @@
 //! Every refusal the keeper answers, as a NAMED variant — the name is the diagnosis,
 //! the message names the fix. Message strings are FROZEN output surface.
-//! enforced by: gate_messages_are_frozen
+//! enforced by: crates/state-keeper/tests/cli.rs (each variant from its trigger)
 
 use thiserror::Error;
 
@@ -34,56 +34,4 @@ pub enum Gate {
     /// Fix: replace data/scenario-table.bin with the on-chain generation's artifact.
     #[error("scenario table mismatch against the on-chain scenarioRoot")]
     RebuildScenarioRootMismatch,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Gate;
-
-    /// The runtime strings are part of the observable surface — a variant may gain
-    /// precision only by conscious edit of BOTH the format string and this record.
-    #[test]
-    fn gate_messages_are_frozen() {
-        let cases: Vec<(Gate, &str)> = vec![
-            (
-                Gate::TableArtifactNotThisGeneration { local: "aa".into(), pinned: "bb".into() },
-                "scenario table root mismatch: data/scenario-table.bin commits 0xaa, chains.json pins 0xbb — the core would reject every proof built on this table",
-            ),
-            (
-                Gate::VerifyVkeyDrift,
-                "the core answers a DIFFERENT vkey than this build is pinned to — do not advance",
-            ),
-            (
-                Gate::VerifyScenarioRootDrift,
-                "the committed scenario table does not match the on-chain scenarioRoot",
-            ),
-            (
-                Gate::PrivateKeyUnset,
-                "PRIVATE_KEY is not set — the advance signs a real transaction",
-            ),
-            (
-                Gate::AdvanceWrongGeneration { chain: "cc".into(), pinned: "0xdd".into() },
-                "core vkey 0xcc != pinned 0xdd — wrong generation, refusing",
-            ),
-            (
-                Gate::AdvanceScenarioRootDrift,
-                "scenario table does not match the on-chain scenarioRoot — refusing to prove",
-            ),
-            (
-                Gate::RebuildRootMismatch,
-                "REBUILD MISMATCH: the replayed tree does not reproduce the on-chain root",
-            ),
-            (
-                Gate::RebuildRegistryMismatch,
-                "REBUILD MISMATCH: the replayed registry does not reproduce the on-chain accountsRoot",
-            ),
-            (
-                Gate::RebuildScenarioRootMismatch,
-                "scenario table mismatch against the on-chain scenarioRoot",
-            ),
-        ];
-        for (gate, want) in cases {
-            assert_eq!(gate.to_string(), want);
-        }
-    }
 }
