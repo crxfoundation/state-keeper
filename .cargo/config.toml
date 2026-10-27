@@ -1,0 +1,3 @@
+# Fixed proptest seed for every test run (K4). The vendored engine sets its own case counts.
+[env]
+PROPTEST_RNG_SEED = "0"
