@@ -352,3 +352,65 @@ async fn cmd_advance(chain_name: &str) -> Result<()> {
     }
     bail!("gave up after {MAX_REBASE} rebase attempts — the lane is advancing faster than this step")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::fresh_epoch_inputs;
+    use crx_tree::replay::{AccountState, TreeState};
+    use crx_tree::scan::{ChainHistory, TwapBoundRecord};
+
+    const NOW: u64 = 1_761_000_000;
+
+    fn feed(oracle: u8) -> [u8; 32] {
+        let mut f = [0u8; 32];
+        f[12..].copy_from_slice(&[oracle; 20]);
+        f
+    }
+
+    fn bound(oracle: u8, close_time: u64, twap: i64) -> TwapBoundRecord {
+        TwapBoundRecord { feed_id: feed(oracle), close_time, twap, expo: -5, block: 1 }
+    }
+
+    /// Marks: the newest bound price per feed, only when fresh and not negative. Settle prices:
+    /// only a bound price at an open position's expiry for its oracle.
+    #[test]
+    fn the_next_epoch_takes_fresh_marks_and_settle_prices_at_expiry_only() {
+        let expiry = NOW - 7_200;
+        let position = im_types::PositionRecord {
+            terms_id: [1u8; 32],
+            counterparty: [2u8; 20],
+            oracle: [0xA0u8; 20],
+            notional: 1_000_000,
+            entry_rate: 1_000_000,
+            side: 1,
+            expiry,
+            pushed_im: 0,
+            market_key: [3u8; 32],
+        };
+        let mut state = TreeState::default();
+        state.accounts.insert([9u8; 32], AccountState { owner: [4u8; 20], vm_equity: 0, positions: vec![position] });
+        let history = ChainHistory {
+            opens: vec![],
+            folds: vec![],
+            twaps: vec![
+                bound(0xA0, NOW - 60, 105),
+                bound(0xA0, expiry, 101),
+                bound(0xA0, expiry - 3_600, 99),
+                bound(0xB0, NOW - 30, -1),
+                bound(0xC0, NOW - 3 * 3_600, 77),
+            ],
+            market_sets: vec![],
+            head: 10,
+        };
+        let inputs = fresh_epoch_inputs(&history, &state, [5u8; 32], NOW).unwrap();
+
+        let marks: Vec<(u8, u64, u128)> =
+            inputs.proven_marks.iter().map(|m| (m.feed_id[12], m.mark_time, m.price)).collect();
+        assert_eq!(marks, vec![(0xA0, NOW - 60, 105)]);
+        let settles: Vec<(u8, u64, u128)> =
+            inputs.proven_twaps.iter().map(|t| (t.feed_id[12], t.close_time, t.settle_price)).collect();
+        assert_eq!(settles, vec![(0xA0, expiry, 101)]);
+        assert!(inputs.new_positions.is_empty());
+        assert_eq!((inputs.proof_now, inputs.domain_separator), (NOW, [5u8; 32]));
+    }
+}

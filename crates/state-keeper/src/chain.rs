@@ -90,3 +90,25 @@ pub async fn read_chain<P: Provider>(provider: &P, lane: &Lane) -> Result<ChainS
         vkey: core.imVkey().call().await.context("core.imVkey()")?.0,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{load_lane, parse_addr, parse_b32};
+
+    #[test]
+    fn a_bytes32_is_32_bytes_of_hex() {
+        assert_eq!(parse_b32(&format!("0x{}", "ab".repeat(32))).unwrap(), [0xab; 32]);
+        assert!(parse_b32(&"ab".repeat(31)).unwrap_err().to_string().ends_with("wrong length"));
+        assert!(parse_b32("0xzz").unwrap_err().to_string().starts_with("bad bytes32"));
+        assert!(parse_addr("0x12").unwrap_err().to_string().starts_with("bad address"));
+    }
+
+    /// Run from the crate dir, the lookup climbs to the repository's chains.json.
+    #[test]
+    fn a_lane_is_found_by_name_and_an_unknown_name_is_refused() {
+        let celo = load_lane("celo").unwrap();
+        assert_eq!(celo.chain_id, 11_142_220);
+        let e = load_lane("mainnet").unwrap_err().to_string();
+        assert_eq!(e, "no lane named 'mainnet' in chains.json");
+    }
+}

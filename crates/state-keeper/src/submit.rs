@@ -86,3 +86,26 @@ pub async fn submit_apply_state(
     }
     Ok(SubmitOutcome::Mined(format!("{tx_hash:#x}")))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{is_already_known, is_stale_root_revert};
+
+    /// A lost CAS race reads as StaleRoot by name or by its selector, so the step rebases.
+    #[test]
+    fn a_stale_root_revert_is_known_by_name_or_selector() {
+        let selector = hex::encode(&crx_tree::events::keccak256(&[b"StaleRoot()"])[..4]);
+        assert!(is_stale_root_revert("execution reverted: StaleRoot()"));
+        assert!(is_stale_root_revert(&format!("execution reverted, data: \"0x{selector}\"")));
+        assert!(!is_stale_root_revert("execution reverted: InvalidProof()"));
+    }
+
+    /// A mempool duplicate is success: the transaction will mine.
+    #[test]
+    fn a_mempool_duplicate_is_known_in_each_client_wording() {
+        for m in ["already known", "AlreadyKnown", "transaction already imported", "known transaction: 0x1", "transaction already in pool"] {
+            assert!(is_already_known(m), "{m}");
+        }
+        assert!(!is_already_known("nonce too low"));
+    }
+}
