@@ -76,7 +76,7 @@ pub fn prove_network(frames: &[Vec<u8>]) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::ELF;
+    use super::{prove_network, ELF};
     use sp1_sdk::{
         blocking::{Prover, ProverClient},
         HashableKey, ProvingKey,
@@ -102,5 +102,22 @@ mod tests {
         for pin in pins {
             assert_eq!(vk, pin);
         }
+    }
+
+    /// `prove_network` refuses before any network call: a prover other than the network, then a
+    /// requester key that is unset or blank.
+    #[test]
+    fn prove_network_refuses_another_prover_and_an_unset_or_blank_key() {
+        std::env::set_var("SP1_PROVER", "cpu");
+        let e = prove_network(&[]).unwrap_err().to_string();
+        assert!(e.starts_with("SP1_PROVER=cpu is not permitted"), "{e}");
+        std::env::remove_var("SP1_PROVER");
+        std::env::remove_var("NETWORK_PRIVATE_KEY");
+        let e = prove_network(&[]).unwrap_err().to_string();
+        assert!(e.starts_with("NETWORK_PRIVATE_KEY is not set"), "{e}");
+        std::env::set_var("NETWORK_PRIVATE_KEY", " ");
+        let e = prove_network(&[]).unwrap_err().to_string();
+        std::env::remove_var("NETWORK_PRIVATE_KEY");
+        assert!(e.starts_with("NETWORK_PRIVATE_KEY is not set"), "{e}");
     }
 }
