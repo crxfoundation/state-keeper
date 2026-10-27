@@ -73,3 +73,34 @@ pub fn prove_network(frames: &[Vec<u8>]) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
     }
     Ok((proof_bytes, public_values))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ELF;
+    use sp1_sdk::{
+        blocking::{Prover, ProverClient},
+        HashableKey, ProvingKey,
+    };
+
+    /// The pinned ELF derives the vkey every lane in chains.json pins (sp1 6.3.0 setup on CPU).
+    /// The setup runs about 5 min on a Studio: it runs under CRX_TEST_LONG=1 (release, audit, sp1 bump).
+    #[test]
+    fn the_pinned_elf_derives_the_lanes_vkey() {
+        if std::env::var("CRX_TEST_LONG").as_deref() != Ok("1") {
+            eprintln!("the_pinned_elf_derives_the_lanes_vkey: runs under CRX_TEST_LONG=1");
+            return;
+        }
+        let raw = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../chains.json")).unwrap();
+        let pins: Vec<&str> = raw
+            .split("\"vkey\"")
+            .skip(1)
+            .map(|s| s.split('"').nth(1).expect("a vkey string"))
+            .collect();
+        assert!(!pins.is_empty(), "chains.json pins a vkey per lane");
+        let pk = ProverClient::builder().cpu().build().setup(ELF).unwrap();
+        let vk = pk.verifying_key().bytes32();
+        for pin in pins {
+            assert_eq!(vk, pin);
+        }
+    }
+}
