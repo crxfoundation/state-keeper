@@ -11,7 +11,7 @@ cargo build --release
 ```
 
 Tests: `scripts/test.sh`. The vendored engine runs its audit-tagged floor only; `VENDOR.tsv` pins its bytes.
-`CRX_TEST_LONG=1 scripts/test.sh` runs every test, the vendored engine and the ELF-to-vkey check included, before each release, audit send and sp1 bump.
+`CRX_TEST_LONG=1 scripts/test.sh` runs every test, the vendored engine and the ELF-to-vkey and guest-execute checks included, before each release, audit send and sp1 bump.
 
 Pins — vkey `0x005283d662917901042cc66534ede1c3ee827fb129293f70239d745485d85a8e`;
 guest ELF `elf/scenario-es-program` sha256 `6068e927e1d962783b9b144efd36395ac013f65011e1a1ba567858e735b1ccaa`,

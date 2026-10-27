@@ -1,7 +1,7 @@
 #!/bin/sh
 # Default test run. The vendored guest engine (crates/vendor) runs only the audit-tagged
 # tests in FLOOR; VENDOR.tsv and crates/crx-tree/tests/vendor_pin.rs pin its bytes.
-# CRX_TEST_LONG=1 runs every test of every member, the ELF-to-vkey check included.
+# CRX_TEST_LONG=1 runs every test of every member, the ELF-to-vkey and guest-execute checks included.
 set -u
 cd "$(dirname "$0")/.." || exit 2
 
